@@ -1,0 +1,18 @@
+type: object
+name: PlayerInfo
+properties:
+  id:
+    type: uint
+  position:
+    type: point3f
+  crc:
+    type: ushort
+  customCrc:
+    type: ushort
+  dir:
+    type: byte
+  objectState1:
+    type: uint
+  objectState2:
+    type: uint
+

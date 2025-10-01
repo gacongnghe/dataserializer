@@ -1,0 +1,10 @@
+type: object
+name: ElfVigor
+properties:
+  vigor:
+    type: int
+  maxVigor:
+    type: int
+  vigorGen:
+    type: int
+
