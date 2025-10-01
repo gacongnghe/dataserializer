@@ -170,19 +170,23 @@ The project includes GitHub Actions workflows for automated testing and validati
 ### CI Pipeline (`ci.yml`)
 - Runs on every push and pull request
 - Builds the solution in Release configuration
-- Runs all tests and reports results
+- Runs all tests and validates YAML schemas
 - **Pipeline passes only when all tests pass**
 
 ### Build and Test Pipeline (`build-and-test.yml`)
-- Cross-platform testing (Linux, Windows, macOS)
-- Code coverage collection
-- Security scanning for vulnerable packages
-- Package publishing on main branch
+- Simple build and test workflow
+- Runs on Linux with .NET 8.0
+- **Pipeline passes only when all tests pass**
+
+### Test Pipeline (`test.yml`)
+- Dedicated test workflow with verification
+- Shows test count and results
+- **Pipeline passes only when all 20 tests pass**
 
 ### YAML Schema Validation (`validate-schemas.yml`)
-- Validates all YAML files in `schema/gamedata/`
-- Ensures YAML syntax is correct
+- Validates YAML schema files when they change
 - Runs integration tests specifically for schema parsing
+- **Pipeline passes only when all tests pass**
 
 ### Pipeline Status
 The build status is shown with badges at the top of this README. The pipeline will:
