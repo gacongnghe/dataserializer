@@ -1,5 +1,8 @@
 # GameDataLibrary
 
+[![CI](https://github.com/your-username/GameDataLibrary/workflows/CI/badge.svg)](https://github.com/your-username/GameDataLibrary/actions/workflows/ci.yml)
+[![Build and Test](https://github.com/your-username/GameDataLibrary/workflows/Build%20and%20Test/badge.svg)](https://github.com/your-username/GameDataLibrary/actions/workflows/build-and-test.yml)
+
 A .NET Core library for parsing YAML game data schema files with comprehensive testing and validation capabilities.
 
 ## Features
@@ -159,6 +162,33 @@ dotnet test
 # Run tests with verbose output
 dotnet test --verbosity normal
 ```
+
+## CI/CD Pipeline
+
+The project includes GitHub Actions workflows for automated testing and validation:
+
+### CI Pipeline (`ci.yml`)
+- Runs on every push and pull request
+- Builds the solution in Release configuration
+- Runs all tests and reports results
+- **Pipeline passes only when all tests pass**
+
+### Build and Test Pipeline (`build-and-test.yml`)
+- Cross-platform testing (Linux, Windows, macOS)
+- Code coverage collection
+- Security scanning for vulnerable packages
+- Package publishing on main branch
+
+### YAML Schema Validation (`validate-schemas.yml`)
+- Validates all YAML files in `schema/gamedata/`
+- Ensures YAML syntax is correct
+- Runs integration tests specifically for schema parsing
+
+### Pipeline Status
+The build status is shown with badges at the top of this README. The pipeline will:
+- ✅ **Pass** when all tests pass
+- ❌ **Fail** when any test fails or build errors occur
+- 🔄 **Show progress** with real-time status updates
 
 ## Test Results
 
