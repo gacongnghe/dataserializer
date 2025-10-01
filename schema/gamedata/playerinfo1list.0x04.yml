@@ -1,0 +1,10 @@
+type: object
+name: PlayerInfo1List
+properties:
+  players:
+    type: array
+    meta:
+      size: 2
+      encoding: null
+      itemType: ref(playerinfo.yml)
+
