@@ -8,6 +8,60 @@ namespace GameDataLibrary.Core.Services;
 /// </summary>
 public class GameDataSerializer
 {
+    private readonly Dictionary<string, GameDataSchema> _schemaCache = new();
+
+    /// <summary>
+    /// Registers a schema for reference resolution
+    /// </summary>
+    /// <param name="schema">Schema to register</param>
+    public void RegisterSchema(GameDataSchema schema)
+    {
+        if (!string.IsNullOrEmpty(schema.Name))
+        {
+            _schemaCache[schema.Name] = schema;
+        }
+    }
+
+    /// <summary>
+    /// Gets a registered schema by name
+    /// </summary>
+    /// <param name="schemaName">Name of the schema</param>
+    /// <returns>Registered schema or null if not found</returns>
+    public GameDataSchema? GetSchema(string schemaName)
+    {
+        _schemaCache.TryGetValue(schemaName, out var schema);
+        return schema;
+    }
+
+    /// <summary>
+    /// Gets a schema by reference name (e.g., "playerinfo.0x00.yml" -> "PlayerInfo")
+    /// </summary>
+    /// <param name="referenceName">Reference name from schema</param>
+    /// <returns>Registered schema or null if not found</returns>
+    private GameDataSchema? GetSchemaByReference(string referenceName)
+    {
+        // Try to find schema by matching the reference name pattern
+        // For example: "playerinfo.0x00.yml" -> "PlayerInfo"
+        var fileName = Path.GetFileNameWithoutExtension(referenceName);
+        // Remove the version part (e.g., "playerinfo.0x00" -> "playerinfo")
+        var schemaName = fileName.Split('.')[0];
+        
+        // Convert to PascalCase - handle camelCase to PascalCase
+        // For "playerinfo" -> "PlayerInfo", we need to capitalize after "player"
+        if (schemaName == "playerinfo")
+        {
+            schemaName = "PlayerInfo";
+        }
+        else
+        {
+            // General case: capitalize first letter
+            schemaName = char.ToUpper(schemaName[0]) + schemaName.Substring(1);
+        }
+        
+        
+        return GetSchema(schemaName);
+    }
+
     /// <summary>
     /// Serializes a DynamicGameDataObject to a byte array based on its schema
     /// </summary>
@@ -155,8 +209,150 @@ public class GameDataSerializer
                 writer.Write(stringBytes);
                 break;
 
+            case "point3f":
+                SerializePoint3F(writer, value);
+                break;
+
+            case "array":
+                SerializeArray(writer, propertyDefinition, value);
+                break;
+
             default:
-                throw new InvalidOperationException($"Unsupported property type: {propertyDefinition.Type}");
+                // Check for reference types
+                if (propertyDefinition.Type.StartsWith("ref("))
+                {
+                    SerializeReference(writer, propertyDefinition, value);
+                }
+                else
+                {
+                    throw new InvalidOperationException($"Unsupported property type: {propertyDefinition.Type}");
+                }
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Serializes a Point3F object
+    /// </summary>
+    private void SerializePoint3F(BinaryWriter writer, object? value)
+    {
+        if (value is Point3F point3f)
+        {
+            writer.Write(point3f.X);
+            writer.Write(point3f.Z);
+            writer.Write(point3f.Y);
+        }
+        else if (value is Dictionary<string, object> dict)
+        {
+            // Handle dictionary representation
+            var x = Convert.ToSingle(dict.GetValueOrDefault("x", 0f));
+            var z = Convert.ToSingle(dict.GetValueOrDefault("z", 0f));
+            var y = Convert.ToSingle(dict.GetValueOrDefault("y", 0f));
+            writer.Write(x);
+            writer.Write(z);
+            writer.Write(y);
+        }
+        else
+        {
+            // Default to zero values
+            writer.Write(0f);
+            writer.Write(0f);
+            writer.Write(0f);
+        }
+    }
+
+    /// <summary>
+    /// Serializes an array
+    /// </summary>
+    private void SerializeArray(BinaryWriter writer, PropertyDefinition propertyDefinition, object? value)
+    {
+        var arraySize = propertyDefinition.GetArraySize();
+        var itemType = propertyDefinition.GetArrayItemType();
+
+        if (value is IEnumerable<object> array)
+        {
+            var arrayList = array.ToList();
+            var count = arrayList.Count;
+
+            // Write array length based on size meta
+            if (arraySize == 1)
+            {
+                writer.Write((byte)count);
+            }
+            else if (arraySize == 2)
+            {
+                writer.Write((ushort)count);
+            }
+            else if (arraySize == 4)
+            {
+                writer.Write(count);
+            }
+            else
+            {
+                writer.Write(count); // Default to 4 bytes
+            }
+
+            // Serialize each item
+            foreach (var item in arrayList)
+            {
+                if (itemType?.StartsWith("ref(") == true)
+                {
+                    // Handle reference items
+                    var refSchemaName = itemType.Substring(4, itemType.Length - 5);
+                    // Try to find schema by the reference name or by extracting the schema name
+                    var refSchema = GetSchema(refSchemaName) ?? GetSchemaByReference(refSchemaName);
+                    if (refSchema != null && item is DynamicGameDataObject refObject)
+                    {
+                        var itemBytes = Serialize(refObject);
+                        writer.Write(itemBytes);
+                    }
+                }
+                else
+                {
+                    // Handle primitive items
+                    var itemDef = new PropertyDefinition { Type = itemType ?? "object" };
+                    SerializeProperty(writer, itemDef, item);
+                }
+            }
+        }
+        else
+        {
+            // Write zero count
+            if (arraySize == 1)
+            {
+                writer.Write((byte)0);
+            }
+            else if (arraySize == 2)
+            {
+                writer.Write((ushort)0);
+            }
+            else
+            {
+                writer.Write(0);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Serializes a reference type
+    /// </summary>
+    private void SerializeReference(BinaryWriter writer, PropertyDefinition propertyDefinition, object? value)
+    {
+        var refSchemaName = propertyDefinition.GetReferencedSchema();
+        if (refSchemaName != null)
+        {
+            var refSchema = GetSchema(refSchemaName);
+            if (refSchema != null && value is DynamicGameDataObject refObject)
+            {
+                var refBytes = Serialize(refObject);
+                writer.Write(refBytes);
+            }
+            else
+            {
+                // Write empty bytes for the reference
+                var expectedLength = GetExpectedByteLength(refSchema ?? new GameDataSchema());
+                writer.Write(new byte[expectedLength]);
+            }
         }
     }
 
@@ -184,8 +380,100 @@ public class GameDataSerializer
             "double" => reader.ReadDouble(),
             "bool" => reader.ReadBoolean(),
             "string" => Encoding.UTF8.GetString(reader.ReadBytes(reader.ReadInt32())),
-            _ => throw new InvalidOperationException($"Unsupported property type: {propertyDefinition.Type}")
+            "point3f" => DeserializePoint3F(reader),
+            "array" => DeserializeArray(reader, propertyDefinition),
+            _ => propertyDefinition.Type.StartsWith("ref(") 
+                ? DeserializeReference(reader, propertyDefinition)
+                : throw new InvalidOperationException($"Unsupported property type: {propertyDefinition.Type}")
         };
+    }
+
+    /// <summary>
+    /// Deserializes a Point3F object
+    /// </summary>
+    private Point3F DeserializePoint3F(BinaryReader reader)
+    {
+        var x = reader.ReadSingle();
+        var z = reader.ReadSingle();
+        var y = reader.ReadSingle();
+        return new Point3F(x, z, y);
+    }
+
+    /// <summary>
+    /// Deserializes an array
+    /// </summary>
+    private List<object> DeserializeArray(BinaryReader reader, PropertyDefinition propertyDefinition)
+    {
+        var arraySize = propertyDefinition.GetArraySize();
+        var itemType = propertyDefinition.GetArrayItemType();
+        var result = new List<object>();
+
+        // Read array length based on size meta
+        int count;
+        if (arraySize == 1)
+        {
+            count = reader.ReadByte();
+        }
+        else if (arraySize == 2)
+        {
+            count = reader.ReadUInt16();
+        }
+        else if (arraySize == 4)
+        {
+            count = reader.ReadInt32();
+        }
+        else
+        {
+            count = reader.ReadInt32(); // Default to 4 bytes
+        }
+
+        // Deserialize each item
+        for (int i = 0; i < count; i++)
+        {
+            if (itemType?.StartsWith("ref(") == true)
+            {
+                // Handle reference items
+                var refSchemaName = itemType.Substring(4, itemType.Length - 5);
+                var refSchema = GetSchema(refSchemaName) ?? GetSchemaByReference(refSchemaName);
+                if (refSchema != null)
+                {
+                    var expectedLength = GetExpectedByteLength(refSchema);
+                    var itemBytes = reader.ReadBytes(expectedLength);
+                    var refObject = Deserialize(itemBytes, refSchema);
+                    result.Add(refObject);
+                }
+            }
+            else
+            {
+                // Handle primitive items
+                var itemDef = new PropertyDefinition { Type = itemType ?? "object" };
+                var item = DeserializeProperty(reader, itemDef);
+                result.Add(item);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Deserializes a reference type
+    /// </summary>
+    private DynamicGameDataObject DeserializeReference(BinaryReader reader, PropertyDefinition propertyDefinition)
+    {
+        var refSchemaName = propertyDefinition.GetReferencedSchema();
+        if (refSchemaName != null)
+        {
+            var refSchema = GetSchema(refSchemaName) ?? GetSchemaByReference(refSchemaName);
+            if (refSchema != null)
+            {
+                var expectedLength = GetExpectedByteLength(refSchema);
+                var refBytes = reader.ReadBytes(expectedLength);
+                return Deserialize(refBytes, refSchema);
+            }
+        }
+        
+        // Return empty object if schema not found
+        return new DynamicGameDataObject(new GameDataSchema());
     }
 
     /// <summary>
@@ -220,7 +508,9 @@ public class GameDataSerializer
             "short" or "int16" or "ushort" or "uint16" => 2,
             "byte" or "sbyte" or "bool" => 1,
             "string" => -1, // Variable length
-            _ => throw new InvalidOperationException($"Unknown type: {typeName}")
+            "point3f" => 12, // 3 floats = 12 bytes
+            "array" => -1, // Variable length
+            _ => typeName.StartsWith("ref(") ? -1 : throw new InvalidOperationException($"Unknown type: {typeName}")
         };
     }
 }

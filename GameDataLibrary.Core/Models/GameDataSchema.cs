@@ -27,6 +27,42 @@ public class PropertyDefinition
 
     [YamlMember(Alias = "meta")]
     public Dictionary<string, object>? Meta { get; set; }
+
+    /// <summary>
+    /// Gets the referenced schema file name for ref types
+    /// </summary>
+    public string? GetReferencedSchema()
+    {
+        if (Type.StartsWith("ref(") && Type.EndsWith(")"))
+        {
+            return Type.Substring(4, Type.Length - 5);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Gets the array size from meta information
+    /// </summary>
+    public int? GetArraySize()
+    {
+        if (Meta?.TryGetValue("size", out var sizeObj) == true && sizeObj is int size)
+        {
+            return size;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Gets the item type for arrays from meta information
+    /// </summary>
+    public string? GetArrayItemType()
+    {
+        if (Meta?.TryGetValue("itemType", out var itemTypeObj) == true)
+        {
+            return itemTypeObj?.ToString();
+        }
+        return null;
+    }
 }
 
 /// <summary>
