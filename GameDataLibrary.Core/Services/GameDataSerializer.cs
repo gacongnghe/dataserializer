@@ -213,6 +213,10 @@ public class GameDataSerializer
                 SerializePoint3F(writer, value);
                 break;
 
+            case "timestamp":
+                SerializeTimestamp(writer, value);
+                break;
+
             case "array":
                 SerializeArray(writer, propertyDefinition, value);
                 break;
@@ -258,6 +262,28 @@ public class GameDataSerializer
             writer.Write(0f);
             writer.Write(0f);
             writer.Write(0f);
+        }
+    }
+
+    /// <summary>
+    /// Serializes a timestamp (DateTime) as a 4-byte Unix timestamp
+    /// </summary>
+    private void SerializeTimestamp(BinaryWriter writer, object? value)
+    {
+        if (value is DateTime dateTime)
+        {
+            var timestamp = (uint)((DateTimeOffset)dateTime).ToUnixTimeSeconds();
+            writer.Write(timestamp);
+        }
+        else if (value is string dateTimeString && DateTime.TryParse(dateTimeString, out var parsedDateTime))
+        {
+            var timestamp = (uint)((DateTimeOffset)parsedDateTime).ToUnixTimeSeconds();
+            writer.Write(timestamp);
+        }
+        else
+        {
+            // Default to zero timestamp (Unix epoch)
+            writer.Write(0u);
         }
     }
 
@@ -381,6 +407,7 @@ public class GameDataSerializer
             "bool" => reader.ReadBoolean(),
             "string" => Encoding.UTF8.GetString(reader.ReadBytes(reader.ReadInt32())),
             "point3f" => DeserializePoint3F(reader),
+            "timestamp" => DeserializeTimestamp(reader),
             "array" => DeserializeArray(reader, propertyDefinition),
             _ => propertyDefinition.Type.StartsWith("ref(") 
                 ? DeserializeReference(reader, propertyDefinition)
@@ -397,6 +424,15 @@ public class GameDataSerializer
         var z = reader.ReadSingle();
         var y = reader.ReadSingle();
         return new Point3F(x, z, y);
+    }
+
+    /// <summary>
+    /// Deserializes a timestamp (4-byte Unix timestamp) to DateTime
+    /// </summary>
+    private DateTime DeserializeTimestamp(BinaryReader reader)
+    {
+        var timestamp = reader.ReadUInt32();
+        return DateTimeOffset.FromUnixTimeSeconds(timestamp).UtcDateTime;
     }
 
     /// <summary>
@@ -503,7 +539,7 @@ public class GameDataSerializer
     {
         return typeName.ToLowerInvariant() switch
         {
-            "int" or "int32" or "uint" or "uint32" or "float" => 4,
+            "int" or "int32" or "uint" or "uint32" or "float" or "timestamp" => 4,
             "long" or "int64" or "ulong" or "uint64" or "double" => 8,
             "short" or "int16" or "ushort" or "uint16" => 2,
             "byte" or "sbyte" or "bool" => 1,

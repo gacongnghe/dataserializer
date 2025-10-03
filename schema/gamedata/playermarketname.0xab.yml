@@ -1,0 +1,13 @@
+type: object
+name: PlayerMarketName
+properties:
+  roleId:
+    type: uint
+  crc:
+    type: byte
+  name:
+    type: string
+    meta:
+      encoding: utf16
+      size: -1
+

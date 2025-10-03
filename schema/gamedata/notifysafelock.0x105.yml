@@ -1,0 +1,12 @@
+type: object
+name: NotifySafeLock
+properties:
+  active:
+    type: byte
+  time:
+    type: timestamp
+  maxTime:
+    type: int
+  unknown:
+    type: byte
+
