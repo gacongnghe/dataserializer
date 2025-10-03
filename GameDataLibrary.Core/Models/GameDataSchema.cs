@@ -63,6 +63,30 @@ public class PropertyDefinition
         }
         return null;
     }
+
+    /// <summary>
+    /// Gets the encoding for string types from meta information
+    /// </summary>
+    public string? GetStringEncoding()
+    {
+        if (Meta?.TryGetValue("encoding", out var encodingObj) == true)
+        {
+            return encodingObj?.ToString()?.ToLowerInvariant();
+        }
+        return "utf8"; // Default to UTF8
+    }
+
+    /// <summary>
+    /// Gets the size handling for string types from meta information
+    /// </summary>
+    public int? GetStringSize()
+    {
+        if (Meta?.TryGetValue("size", out var sizeObj) == true && sizeObj is int size)
+        {
+            return size;
+        }
+        return 0; // Default to auto-detect (null-terminated)
+    }
 }
 
 /// <summary>

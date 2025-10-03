@@ -203,10 +203,7 @@ public class GameDataSerializer
                 break;
 
             case "string":
-                var stringValue = value?.ToString() ?? string.Empty;
-                var stringBytes = Encoding.UTF8.GetBytes(stringValue);
-                writer.Write(stringBytes.Length);
-                writer.Write(stringBytes);
+                SerializeString(writer, propertyDefinition, value);
                 break;
 
             case "point3f":
@@ -284,6 +281,73 @@ public class GameDataSerializer
         {
             // Default to zero timestamp (Unix epoch)
             writer.Write(0u);
+        }
+    }
+
+    /// <summary>
+    /// Serializes a string with encoding and size handling
+    /// </summary>
+    private void SerializeString(BinaryWriter writer, PropertyDefinition propertyDefinition, object? value)
+    {
+        var stringValue = value?.ToString() ?? string.Empty;
+        var encoding = propertyDefinition.GetStringEncoding() ?? "utf8";
+        var size = propertyDefinition.GetStringSize() ?? 0;
+
+        byte[] stringBytes;
+        switch (encoding)
+        {
+            case "ascii":
+                stringBytes = Encoding.ASCII.GetBytes(stringValue);
+                break;
+            case "utf8":
+                stringBytes = Encoding.UTF8.GetBytes(stringValue);
+                break;
+            case "utf16":
+                stringBytes = Encoding.Unicode.GetBytes(stringValue);
+                // Add null terminator for UTF-16
+                var nullTerminator = new byte[] { 0x00, 0x00 };
+                stringBytes = stringBytes.Concat(nullTerminator).ToArray();
+                break;
+            default:
+                throw new InvalidOperationException($"Unsupported string encoding: {encoding}");
+        }
+
+        if (size == 0)
+        {
+            // Auto-detect by null character - write length then data
+            writer.Write(stringBytes.Length);
+            writer.Write(stringBytes);
+        }
+        else if (size > 0)
+        {
+            // Fixed number of bytes for length
+            if (size == 1)
+            {
+                writer.Write((byte)stringBytes.Length);
+            }
+            else if (size == 2)
+            {
+                writer.Write((ushort)stringBytes.Length);
+            }
+            else if (size == 4)
+            {
+                writer.Write(stringBytes.Length);
+            }
+            else
+            {
+                throw new InvalidOperationException($"Unsupported string size: {size}");
+            }
+            writer.Write(stringBytes);
+        }
+        else if (size == -1)
+        {
+            // Compact integer for length
+            WriteCompactSint32(writer, stringBytes.Length);
+            writer.Write(stringBytes);
+        }
+        else
+        {
+            throw new InvalidOperationException($"Invalid string size: {size}");
         }
     }
 
@@ -405,7 +469,7 @@ public class GameDataSerializer
             "float" => reader.ReadSingle(),
             "double" => reader.ReadDouble(),
             "bool" => reader.ReadBoolean(),
-            "string" => Encoding.UTF8.GetString(reader.ReadBytes(reader.ReadInt32())),
+            "string" => DeserializeString(reader, propertyDefinition),
             "point3f" => DeserializePoint3F(reader),
             "timestamp" => DeserializeTimestamp(reader),
             "array" => DeserializeArray(reader, propertyDefinition),
@@ -433,6 +497,70 @@ public class GameDataSerializer
     {
         var timestamp = reader.ReadUInt32();
         return DateTimeOffset.FromUnixTimeSeconds(timestamp).UtcDateTime;
+    }
+
+    /// <summary>
+    /// Deserializes a string with encoding and size handling
+    /// </summary>
+    private string DeserializeString(BinaryReader reader, PropertyDefinition propertyDefinition)
+    {
+        var encoding = propertyDefinition.GetStringEncoding() ?? "utf8";
+        var size = propertyDefinition.GetStringSize() ?? 0;
+
+        int stringLength;
+        if (size == 0)
+        {
+            // Auto-detect by null character - read length then data
+            stringLength = reader.ReadInt32();
+        }
+        else if (size > 0)
+        {
+            // Fixed number of bytes for length
+            if (size == 1)
+            {
+                stringLength = reader.ReadByte();
+            }
+            else if (size == 2)
+            {
+                stringLength = reader.ReadUInt16();
+            }
+            else if (size == 4)
+            {
+                stringLength = reader.ReadInt32();
+            }
+            else
+            {
+                throw new InvalidOperationException($"Unsupported string size: {size}");
+            }
+        }
+        else if (size == -1)
+        {
+            // Compact integer for length
+            stringLength = ReadCompactSint32(reader);
+        }
+        else
+        {
+            throw new InvalidOperationException($"Invalid string size: {size}");
+        }
+
+        var stringBytes = reader.ReadBytes(stringLength);
+        
+        switch (encoding)
+        {
+            case "ascii":
+                return Encoding.ASCII.GetString(stringBytes);
+            case "utf8":
+                return Encoding.UTF8.GetString(stringBytes);
+            case "utf16":
+                // Remove null terminator if present
+                if (stringBytes.Length >= 2 && stringBytes[stringBytes.Length - 2] == 0 && stringBytes[stringBytes.Length - 1] == 0)
+                {
+                    stringBytes = stringBytes.Take(stringBytes.Length - 2).ToArray();
+                }
+                return Encoding.Unicode.GetString(stringBytes);
+            default:
+                throw new InvalidOperationException($"Unsupported string encoding: {encoding}");
+        }
     }
 
     /// <summary>
@@ -548,5 +676,103 @@ public class GameDataSerializer
             "array" => -1, // Variable length
             _ => typeName.StartsWith("ref(") ? -1 : throw new InvalidOperationException($"Unknown type: {typeName}")
         };
+    }
+
+    /// <summary>
+    /// Writes a compact signed 32-bit integer to the stream
+    /// Based on compact_sint32 from gnmarshal.h
+    /// </summary>
+    /// <param name="writer">Binary writer</param>
+    /// <param name="value">Value to write</param>
+    private void WriteCompactSint32(BinaryWriter writer, int value)
+    {
+        if (value >= 0)
+        {
+            if (value < 0x40)
+            {
+                writer.Write((byte)value);
+            }
+            else if (value < 0x2000)
+            {
+                writer.Write((ushort)(value | 0x8000));
+            }
+            else if (value < 0x10000000)
+            {
+                writer.Write((uint)(value | 0xc0000000));
+            }
+            else
+            {
+                writer.Write((byte)0xe0);
+                writer.Write((uint)value);
+            }
+        }
+        else
+        {
+            int absValue = -value;
+            if (absValue > 0)
+            {
+                if (absValue < 0x40)
+                {
+                    writer.Write((byte)(absValue | 0x40));
+                }
+                else if (absValue < 0x2000)
+                {
+                    writer.Write((ushort)(absValue | 0xa000));
+                }
+                else if (absValue < 0x10000000)
+                {
+                    writer.Write((uint)(absValue | 0xd0000000));
+                }
+                else
+                {
+                    writer.Write((byte)0xf0);
+                    writer.Write((uint)absValue);
+                }
+            }
+            else
+            {
+                writer.Write((byte)0xf0);
+                writer.Write((uint)value);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads a compact signed 32-bit integer from the stream
+    /// Based on uncompact_sint32 from gnmarshal.h
+    /// </summary>
+    /// <param name="reader">Binary reader</param>
+    /// <returns>Read value</returns>
+    private int ReadCompactSint32(BinaryReader reader)
+    {
+        if (reader.BaseStream.Position >= reader.BaseStream.Length)
+            throw new InvalidOperationException("End of stream reached");
+
+        byte firstByte = reader.ReadByte();
+        
+        switch (firstByte & 0xf0)
+        {
+            case 0xf0:
+                return -(int)reader.ReadUInt32();
+            case 0xe0:
+                return reader.ReadInt32();
+            case 0xd0:
+                return -(int)(reader.ReadUInt32() & ~0xd0000000);
+            case 0xc0:
+                return (int)(reader.ReadUInt32() & ~0xc0000000);
+            case 0xb0:
+            case 0xa0:
+                return -(reader.ReadUInt16() & ~0xa000);
+            case 0x90:
+            case 0x80:
+                return reader.ReadUInt16() & ~0x8000;
+            case 0x70:
+            case 0x60:
+            case 0x50:
+            case 0x40:
+                return -(firstByte & ~0x40);
+            default:
+                return firstByte;
+        }
     }
 }
